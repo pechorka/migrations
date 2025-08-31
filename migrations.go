@@ -3,8 +3,9 @@ package migrations
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
+
+	"github.com/pechorka/migrations/pkg/utils"
 )
 
 func Apply(ctx context.Context, db *sql.DB, migrations []string, userOptions ...Option) error {
@@ -91,7 +92,7 @@ func IsValidDialect(d Dialect) bool {
 // Options end
 
 func applySqlite(ctx context.Context, db *sql.DB, migrations []string, opts Options) error {
-	err := inTx(ctx, db, func(ctx context.Context, tx *sql.Tx) error {
+	err := utils.InTx(ctx, db, func(ctx context.Context, tx *sql.Tx) error {
 		createStmt := fmt.Sprintf(
 			`CREATE TABLE IF NOT EXISTS "%s" (
                 version INTEGER PRIMARY KEY,
@@ -132,8 +133,8 @@ func applySqlite(ctx context.Context, db *sql.DB, migrations []string, opts Opti
 }
 
 func applyMysql(ctx context.Context, db *sql.DB, migrations []string, opts Options) error {
-	err := inTx(ctx, db, func(ctx context.Context, tx *sql.Tx) error {
-		createStmt := "CREATE TABLE IF NOT EXISTS `" + opts.TableName + "`" + `(
+	err := utils.InTx(ctx, db, func(ctx context.Context, tx *sql.Tx) error {
+		createStmt := `CREATE TABLE IF NOT EXISTS ` + utils.QuoteIdentBacktick(opts.TableName) + `(
 			    version INT NOT NULL PRIMARY KEY,
 			    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 			)`
@@ -171,7 +172,7 @@ func applyMysql(ctx context.Context, db *sql.DB, migrations []string, opts Optio
 }
 
 func applyPostgres(ctx context.Context, db *sql.DB, migrations []string, opts Options) error {
-	err := inTx(ctx, db, func(ctx context.Context, tx *sql.Tx) error {
+	err := utils.InTx(ctx, db, func(ctx context.Context, tx *sql.Tx) error {
 		createStmt := fmt.Sprintf(
 			`CREATE TABLE IF NOT EXISTS "%s" (
                 version INTEGER PRIMARY KEY,
@@ -208,26 +209,5 @@ func applyPostgres(ctx context.Context, db *sql.DB, migrations []string, opts Op
 	if err != nil {
 		return fmt.Errorf("failed to apply migrations for postgres: %w", err)
 	}
-	return nil
-}
-
-func inTx(ctx context.Context, db *sql.DB, fn func(ctx context.Context, tx *sql.Tx) error) error {
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-
-	if err := fn(ctx, tx); err != nil {
-		rerr := tx.Rollback()
-		if rerr != nil {
-			err = errors.Join(err, fmt.Errorf("also failed to rollback transaction: %w", rerr))
-		}
-		return err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
 	return nil
 }
