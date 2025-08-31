@@ -23,6 +23,13 @@ echo "Starting test databases..."
 echo "Running tests..."
 # each test is cleaning db afterwards, so they can't run in parallel.
 export GOFLAGS="${GOFLAGS:-} -p=1 -timeout=30s"
+
 CGO_ENABLED=${CGO_ENABLED:-1} go test -v ./...
+
+echo "Running pgx4 tests..."
+CGO_ENABLED=${CGO_ENABLED:-1} go test -v -tags pgx4 -run '^TestPostgres_PGX4$' ./...
+
+echo "Running pgx5 tests..."
+CGO_ENABLED=${CGO_ENABLED:-1} go test -v -tags pgx5 -run '^TestPostgres_PGX5$' ./...
 
 echo "Tests finished. Cleaning up."
