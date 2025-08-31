@@ -66,6 +66,10 @@ func must(err error) {
 - Bookkeeping table: created if missing, with the shape (version, applied_at)
 - Versioning model: the first element of your `[]string` has version `1`, the second `2`, etc.
 - Statement splitting: each migration string is split on `;` at top level, i.e. never inside `'single'`/`"double"`/``backtick`` quotes, `-- line comments`, `/* block comments */` (nested supported), or Postgres dollar-quoted blocks like `$$ ... $$` or `$tag$ ... $tag$`.
+!!!!!!!WARNING!!!!!!!
+Library tries it's best to split statements properly, but very likely a lot of edge cases are not covered.
+You can always split your multi statement migration in multiple single statement migrations if you have any issues
+!!!!!!!WARNING!!!!!!!
 - Idempotency: the library reads `MAX(version)` from the table and only executes migrations with `version > max`.
 - Recording: after a migration succeeds, the library inserts the applied version into the table.
 
