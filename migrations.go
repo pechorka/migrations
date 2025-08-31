@@ -36,7 +36,8 @@ import (
 //     rolled back and no version is recorded.
 //
 // Dialect and table name can be customized via Option values, e.g.:
-//   Apply(ctx, db, migs, WithDialect(DialectPostgres), WithTableName("schema_migrations"))
+//
+//	Apply(ctx, db, migs, WithDialect(DialectPostgres), WithTableName("schema_migrations"))
 //
 // The default dialect is SQLite and the default table name is "migrations".
 func Apply(ctx context.Context, db *sql.DB, migrations []string, userOptions ...Option) error {
@@ -50,6 +51,10 @@ func Apply(ctx context.Context, db *sql.DB, migrations []string, userOptions ...
 		if err != nil {
 			return fmt.Errorf("issue with option #%d: %w", i+1, err)
 		}
+	}
+
+	if err := validateOptions(opts); err != nil {
+		return fmt.Errorf("invalid options: %w", err)
 	}
 
 	switch opts.Dialect {
@@ -85,11 +90,8 @@ type Option func(opts *Options) error
 // Supported values: DialectSqlite (default), DialectPostgres, DialectMysql.
 // Returns an error from Apply if an unsupported dialect is provided.
 func WithDialect(dialect Dialect) Option {
+	// Validation is performed centrally by validateOptions during Apply.
 	return func(opts *Options) error {
-		if !IsValidDialect(dialect) {
-			return fmt.Errorf("diealect %d is not supported. check 'migrations.Dialect*' for supported options", dialect)
-		}
-
 		opts.Dialect = dialect
 		return nil
 	}
@@ -97,23 +99,11 @@ func WithDialect(dialect Dialect) Option {
 
 // WithTableName overrides the bookkeeping table name (default: "migrations").
 //
-// To avoid SQL injection when interpolating the identifier, only names that
-// match the conservative pattern [A-Za-z_][A-Za-z0-9_]* are accepted.
+// Note: identifier safety ([A-Za-z_][A-Za-z0-9_]*) is enforced centrally by
+// validateOptions during Apply.
 func WithTableName(table string) Option {
+	// Validation is performed centrally by validateOptions during Apply.
 	return func(opts *Options) error {
-		if table == "" {
-			return fmt.Errorf("table name cannot be empty")
-		}
-
-		// Enforce a conservative identifier policy to avoid SQL injection
-		// since identifiers are interpolated into SQL statements.
-		for i, r := range table {
-			if r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9' && i > 0) {
-				continue
-			}
-			return fmt.Errorf("invalid table name %q: only [A-Za-z_][A-Za-z0-9_]* allowed", table)
-		}
-
 		opts.TableName = table
 		return nil
 	}
@@ -139,6 +129,24 @@ func IsValidDialect(d Dialect) bool {
 
 // Options end
 
+// validateOptions performs centralized validation of Options.
+// - Dialect must be one of the supported constants.
+// - TableName must be non-empty and match [A-Za-z_][A-Za-z0-9_]*.
+func validateOptions(opts Options) error {
+	if !IsValidDialect(opts.Dialect) {
+		return fmt.Errorf("dialect %d is not supported", opts.Dialect)
+	}
+	if opts.TableName == "" {
+		return fmt.Errorf("table name cannot be empty")
+	}
+	for i, r := range opts.TableName {
+		if r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9' && i > 0) {
+			continue
+		}
+		return fmt.Errorf("invalid table name %q: only [A-Za-z_][A-Za-z0-9_]* allowed", opts.TableName)
+	}
+	return nil
+}
 func applySqlite(ctx context.Context, db *sql.DB, migrations []string, opts Options) error {
 	err := utils.InTx(ctx, db, func(ctx context.Context, tx *sql.Tx) error {
 		createStmt := fmt.Sprintf(
