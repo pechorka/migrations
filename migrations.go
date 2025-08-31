@@ -147,6 +147,7 @@ func validateOptions(opts Options) error {
 	}
 	return nil
 }
+
 func applySqlite(ctx context.Context, db *sql.DB, migrations []string, opts Options) error {
 	err := utils.InTx(ctx, db, func(ctx context.Context, tx *sql.Tx) error {
 		createStmt := fmt.Sprintf(
@@ -193,16 +194,28 @@ func applySqlite(ctx context.Context, db *sql.DB, migrations []string, opts Opti
 
 func applyMysql(ctx context.Context, db *sql.DB, migrations []string, opts Options) error {
 	err := utils.InTx(ctx, db, func(ctx context.Context, tx *sql.Tx) error {
-		createStmt := `CREATE TABLE IF NOT EXISTS ` + utils.QuoteIdentBacktick(opts.TableName) + `(
-			    version INT NOT NULL PRIMARY KEY,
-			    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-			)`
+		t := utils.QuoteIdentBacktick(opts.TableName)
+		createStmt := `CREATE TABLE IF NOT EXISTS ` + t + `(
+                version INT NOT NULL PRIMARY KEY,
+                applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )`
 		if _, err := tx.ExecContext(ctx, createStmt); err != nil {
 			return fmt.Errorf("failed to create migrations table %q: %w", opts.TableName, err)
 		}
 
+		// Ensure the sentinel lock row exists and lock it for the duration of the tx.
+		ensureSentinel := `INSERT IGNORE INTO ` + t + ` (version) VALUES (0)`
+		if _, err := tx.ExecContext(ctx, ensureSentinel); err != nil {
+			return fmt.Errorf("failed to ensure sentinel lock row: %w", err)
+		}
+		// Lock the sentinel row (InnoDB row-level lock)
+		lockStmt := `SELECT version FROM ` + t + ` WHERE version = 0 FOR UPDATE`
+		if _, err := tx.ExecContext(ctx, lockStmt); err != nil {
+			return fmt.Errorf("failed to lock migrations table: %w", err)
+		}
+
 		var lastAppliedVersion int
-		queryLast := fmt.Sprintf("SELECT COALESCE(MAX(version), -1) FROM `%s`", opts.TableName)
+		queryLast := "SELECT COALESCE(MAX(version), -1) FROM " + t
 		if err := tx.QueryRowContext(ctx, queryLast).Scan(&lastAppliedVersion); err != nil {
 			return fmt.Errorf("failed to read last applied migration version: %w", err)
 		}
@@ -219,7 +232,7 @@ func applyMysql(ctx context.Context, db *sql.DB, migrations []string, opts Optio
 				}
 			}
 
-			insertStmt := fmt.Sprintf("INSERT INTO `%s` (version) VALUES (?)", opts.TableName)
+			insertStmt := "INSERT INTO " + t + " (version) VALUES (?)"
 			if _, err := tx.ExecContext(ctx, insertStmt, version); err != nil {
 				return fmt.Errorf("failed to record migration #%d: %w", version, err)
 			}
@@ -243,6 +256,16 @@ func applyPostgres(ctx context.Context, db *sql.DB, migrations []string, opts Op
 		)
 		if _, err := tx.ExecContext(ctx, createStmt); err != nil {
 			return fmt.Errorf("failed to create migrations table %q: %w", opts.TableName, err)
+		}
+
+		// Ensure the sentinel lock row exists and lock it using row-level lock.
+		ensureSentinel := fmt.Sprintf(`INSERT INTO "%s" (version) VALUES (0) ON CONFLICT DO NOTHING`, opts.TableName)
+		if _, err := tx.ExecContext(ctx, ensureSentinel); err != nil {
+			return fmt.Errorf("failed to ensure sentinel lock row: %w", err)
+		}
+		lockStmt := fmt.Sprintf(`SELECT version FROM "%s" WHERE version = 0 FOR UPDATE`, opts.TableName)
+		if _, err := tx.ExecContext(ctx, lockStmt); err != nil {
+			return fmt.Errorf("failed to lock migrations table: %w", err)
 		}
 
 		var lastAppliedVersion int
