@@ -114,8 +114,11 @@ func applySqlite(ctx context.Context, db *sql.DB, migrations []string, opts Opti
 			if version <= lastAppliedVersion {
 				continue
 			}
-			if _, err := tx.ExecContext(ctx, migration); err != nil {
-				return fmt.Errorf("failed to apply migration #%d: %w", version, err)
+			stmts := utils.SplitStatements(migration)
+			for i, stmt := range stmts {
+				if _, err := tx.ExecContext(ctx, stmt); err != nil {
+					return fmt.Errorf("failed to apply migration #%d (statement %d): %w", version, i+1, err)
+				}
 			}
 
 			insertStmt := fmt.Sprintf(`INSERT INTO "%s" (version) VALUES (?)`, opts.TableName)
@@ -153,8 +156,11 @@ func applyMysql(ctx context.Context, db *sql.DB, migrations []string, opts Optio
 			if version <= lastAppliedVersion {
 				continue
 			}
-			if _, err := tx.ExecContext(ctx, migration); err != nil {
-				return fmt.Errorf("failed to apply migration #%d: %w", version, err)
+			stmts := utils.SplitStatements(migration)
+			for i, stmt := range stmts {
+				if _, err := tx.ExecContext(ctx, stmt); err != nil {
+					return fmt.Errorf("failed to apply migration #%d (statement %d): %w", version, i+1, err)
+				}
 			}
 
 			insertStmt := fmt.Sprintf("INSERT INTO `%s` (version) VALUES (?)", opts.TableName)
@@ -194,8 +200,11 @@ func applyPostgres(ctx context.Context, db *sql.DB, migrations []string, opts Op
 			if version <= lastAppliedVersion {
 				continue
 			}
-			if _, err := tx.ExecContext(ctx, migration); err != nil {
-				return fmt.Errorf("failed to apply migration #%d: %w", version, err)
+			stmts := utils.SplitStatements(migration)
+			for i, stmt := range stmts {
+				if _, err := tx.ExecContext(ctx, stmt); err != nil {
+					return fmt.Errorf("failed to apply migration #%d (statement %d): %w", version, i+1, err)
+				}
 			}
 
 			insertStmt := fmt.Sprintf(`INSERT INTO "%s" (version) VALUES ($1)`, opts.TableName)

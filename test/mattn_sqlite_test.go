@@ -52,6 +52,57 @@ func TestSQLite(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("single migration: multiple statements (basic)", func(t *testing.T) {
+		db := openDB(t, "sqlite3", dsn, resetSQLite)
+		migs := []string{
+			`CREATE TABLE IF NOT EXISTS ms_items (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL
+    ); 
+			INSERT INTO ms_items (name) VALUES ('alpha');`,
+		}
+		err := migrations.Apply(t.Context(), db, migs, opts...)
+		require.NoError(t, err)
+
+		var n int
+		require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM ms_items`).Scan(&n))
+		require.Equal(t, 1, n)
+	})
+
+	t.Run("single migration: ; in quotes", func(t *testing.T) {
+		db := openDB(t, "sqlite3", dsn, resetSQLite)
+		migs := []string{
+			`CREATE TABLE IF NOT EXISTS ms_items (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL
+    ); 
+			INSERT INTO ms_items (name) VALUES ('a; b');`,
+		}
+		err := migrations.Apply(t.Context(), db, migs, opts...)
+		require.NoError(t, err)
+
+		var got string
+		require.NoError(t, db.QueryRow(`SELECT name FROM ms_items`).Scan(&got))
+		require.Equal(t, "a; b", got)
+	})
+
+	t.Run("single migration: ; in comment", func(t *testing.T) {
+		db := openDB(t, "sqlite3", dsn, resetSQLite)
+		migs := []string{
+			`CREATE TABLE IF NOT EXISTS ms_items (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL
+    ); -- comment with semicolon ; should not split
+    INSERT INTO ms_items (name) VALUES ('ok');`,
+		}
+		err := migrations.Apply(t.Context(), db, migs, opts...)
+		require.NoError(t, err)
+
+		var n int
+		require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM ms_items`).Scan(&n))
+		require.Equal(t, 1, n)
+	})
+
 	t.Run("migration has error", func(t *testing.T) {
 		db := openDB(t, "sqlite3", dsn, resetSQLite)
 		migs := []string{
