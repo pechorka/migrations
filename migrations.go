@@ -1,3 +1,18 @@
+// Package migrations provides a tiny, dependency‑free helper for applying
+// append‑only SQL migrations using database/sql.
+//
+// Migrations are supplied as a slice of SQL strings. Each element in the slice
+// represents a migration with an incrementing version starting at 1. A single
+// migration string may contain multiple SQL statements separated by semicolons;
+// splitting is done safely at the top level (never inside quoted strings,
+// comments, or Postgres dollar‑quoted blocks).
+//
+// Apply creates a bookkeeping table if it does not exist yet and then executes
+// only the migrations whose version is greater than the maximum recorded
+// version. All statements run inside a single transaction; if any statement
+// fails, nothing is recorded and the transaction is rolled back.
+//
+// Supported dialects: SQLite (default), Postgres, and MySQL.
 package migrations
 
 import (
@@ -8,6 +23,22 @@ import (
 	"github.com/pechorka/migrations/pkg/utils"
 )
 
+// Apply runs the pending migrations for the given database connection.
+//
+// Behavior
+//   - Creates the bookkeeping table when missing (name is configurable).
+//   - Determines the last applied version and executes only newer migrations.
+//     The first element of migrations has version 1, the second version 2, and
+//     so on.
+//   - Splits each migration string by semicolons at the top level to allow
+//     multiple statements per migration string.
+//   - Wraps all statements in a single transaction. On error the transaction is
+//     rolled back and no version is recorded.
+//
+// Dialect and table name can be customized via Option values, e.g.:
+//   Apply(ctx, db, migs, WithDialect(DialectPostgres), WithTableName("schema_migrations"))
+//
+// The default dialect is SQLite and the default table name is "migrations".
 func Apply(ctx context.Context, db *sql.DB, migrations []string, userOptions ...Option) error {
 	opts := Options{
 		Dialect:   DialectSqlite,
@@ -35,13 +66,24 @@ func Apply(ctx context.Context, db *sql.DB, migrations []string, userOptions ...
 
 // Options begin
 
+// Options controls how Apply behaves.
+//
+// Use Option helpers (WithDialect, WithTableName) to construct and pass
+// configuration to Apply.
 type Options struct {
 	Dialect   Dialect
 	TableName string
 }
 
+// Option mutates Options passed to Apply.
+//
+// Use WithDialect and WithTableName to construct Option values.
 type Option func(opts *Options) error
 
+// WithDialect selects the SQL dialect used for DDL/DML and placeholders.
+//
+// Supported values: DialectSqlite (default), DialectPostgres, DialectMysql.
+// Returns an error from Apply if an unsupported dialect is provided.
 func WithDialect(dialect Dialect) Option {
 	return func(opts *Options) error {
 		if !IsValidDialect(dialect) {
@@ -53,6 +95,10 @@ func WithDialect(dialect Dialect) Option {
 	}
 }
 
+// WithTableName overrides the bookkeeping table name (default: "migrations").
+//
+// To avoid SQL injection when interpolating the identifier, only names that
+// match the conservative pattern [A-Za-z_][A-Za-z0-9_]* are accepted.
 func WithTableName(table string) Option {
 	return func(opts *Options) error {
 		if table == "" {
@@ -73,6 +119,7 @@ func WithTableName(table string) Option {
 	}
 }
 
+// Dialect enumerates supported SQL dialects.
 type Dialect int32
 
 const (
@@ -85,6 +132,7 @@ const (
 	dialectEnd
 )
 
+// IsValidDialect reports whether d is one of the supported Dialect constants.
 func IsValidDialect(d Dialect) bool {
 	return dialectBegin < d && d < dialectEnd
 }
